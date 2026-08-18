@@ -176,3 +176,17 @@ model MenuPermission {
   @@id([menuId, permissionId])
   @@map("menu_permissions")
 }
+
+// --- MÓDULO DE CATÁLOGO / FLORISTERÍA ---
+model Flor {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nombre      String   @db.VarChar(150)
+  descripcion String?  @db.Text
+  precio      Float
+  stock       Int      @default(0)
+  estado      String   @default("ACTIVO") @db.VarChar(30)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("flores")
+}

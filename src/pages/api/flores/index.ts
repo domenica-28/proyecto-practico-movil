@@ -11,6 +11,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Intentar obtener desde la caché en memoria (Cache-Aside)
       const cachedData = memoryCache.get(CACHE_KEY_FLORES)
       if (cachedData) {
+        console.log('⚡ [API] Datos servidos desde la CACHÉ')
         return res.status(200).json({
           success: true,
           source: 'cache',
@@ -18,19 +19,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
       }
 
-      // Si no está en caché, consultar a PostgreSQL optimizando campos
+      console.log('🛢️ [API] Consultando la Base de Datos PostgreSQL...')
+
+      // Consulta a PostgreSQL optimizando la selección de campos
       const flores = await prisma.flor.findMany({
-        where: { estado: 'ACTIVO' },
         select: {
           id: true,
           nombre: true,
+          descripcion: true,
           precio: true,
           stock: true,
+          estado: true,
         },
         orderBy: { nombre: 'asc' },
       })
 
-      // Guardar en caché por 60 segundos
+      // Guardar resultados en la caché por 60 segundos
       memoryCache.set(CACHE_KEY_FLORES, flores, 60)
 
       return res.status(200).json({
@@ -39,7 +43,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         data: flores,
       })
     } catch (error) {
-      return res.status(500).json({ success: false, error: 'Error al consultar el catálogo' })
+      // Imprime el detalle técnico exacto en la terminal de VS Code
+      console.error('❌ DETALLE DEL ERROR EN GET /api/flores:', error)
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Error al consultar el catálogo',
+        details: error instanceof Error ? error.message : String(error)
+      })
     }
   }
 
@@ -48,18 +58,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const { nombre, descripcion, precio, stock } = req.body
 
+      if (!nombre || precio === undefined || stock === undefined) {
+        return res.status(400).json({
+          success: false,
+          error: 'Los campos nombre, precio y stock son obligatorios',
+        })
+      }
+
       const nuevaFlor = await prisma.flor.create({
         data: {
           nombre,
-          descripcion,
+          descripcion: descripcion || '',
           precio: parseFloat(precio),
           stock: parseInt(stock),
           estado: 'ACTIVO',
         },
       })
 
-      // Invalidate la caché para garantizar la consistencia de datos
+      // Limpiar la caché para mantener consistencia
       memoryCache.clear(CACHE_KEY_FLORES)
+      console.log('🧹 [API] Caché limpiada tras la creación de un nuevo producto')
 
       return res.status(201).json({
         success: true,
@@ -67,7 +85,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         data: nuevaFlor,
       })
     } catch (error) {
-      return res.status(400).json({ success: false, error: 'Error al registrar el producto' })
+      console.error('❌ DETALLE DEL ERROR EN POST /api/flores:', error)
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Error al registrar el producto',
+        details: error instanceof Error ? error.message : String(error)
+      })
     }
   }
 
