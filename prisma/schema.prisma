@@ -188,5 +188,31 @@ model Flor {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
+  @@map("flor_uuid")
+}
+
+model Flores {
+  id          Int      @id @default(autoincrement())
+  nombre      String
+  descripcion String
+  precio      Float
+  stock       Int
+  estado      Boolean  @default(true)
+  imagenUrl   String?
+  pedidos     Pedido[]
+
   @@map("flores")
+}
+
+model Pedido {
+  id       Int      @id @default(autoincrement())
+  florId   Int
+  flor     Flores   @relation(fields: [florId], references: [id])
+  cliente  String
+  cantidad Int
+  visto    Boolean  @default(false)
+  estado   String   @default("Pendiente")
+  fecha    DateTime @default(now())
+
+  @@map("pedidos")
 }
