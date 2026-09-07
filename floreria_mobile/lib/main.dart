@@ -1,7 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-
-import 'dart:convert';
 
 void main() {
   runApp(const MyApp());
@@ -34,11 +34,13 @@ class FloresListScreen extends StatefulWidget {
 class _FloresListScreenState extends State<FloresListScreen> {
   List<dynamic> flores = [];
   bool isLoading = true;
-  bool isAdmin = false; // Control de sesión de Administrador
+  bool isAdmin = false;
+  String? authToken; // Guarda el token JWT tras un login exitoso
 
+  // URLs base del Backend NestJS
   final String apiUrl = 'http://10.0.2.2:3000/api/flores';
   final String pedidosUrl = 'http://10.0.2.2:3000/api/pedidos';
-  final String loginUrl = 'http://10.0.2.2:3000/api/login';
+  final String loginUrl = 'http://10.0.2.2:3000/api/auth/login';
 
   @override
   void initState() {
@@ -51,30 +53,41 @@ class _FloresListScreenState extends State<FloresListScreen> {
     try {
       final response = await http.get(Uri.parse(apiUrl));
       if (response.statusCode == 200) {
-        setState(() {
-          flores = json.decode(response.body);
-          isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            flores = json.decode(response.body);
+            isLoading = false;
+          });
+        }
+      } else {
+        _showSnackBar('Error al cargar catálogo (${response.statusCode})');
+        if (mounted) setState(() => isLoading = false);
       }
     } catch (e) {
-      setState(() => isLoading = false);
+      _showSnackBar('Error de conexión con el servidor');
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
+  void _showSnackBar(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
   void _loginDialog() {
-    TextEditingController userCtrl = TextEditingController();
-    TextEditingController passCtrl = TextEditingController();
+    final userCtrl = TextEditingController();
+    final passCtrl = TextEditingController();
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Iniciar Sesión - Admin'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: userCtrl,
-              decoration: const InputDecoration(labelText: 'Usuario'),
+              decoration: const InputDecoration(labelText: 'Usuario / Email'),
             ),
             TextField(
               controller: passCtrl,
@@ -85,7 +98,11 @@ class _FloresListScreenState extends State<FloresListScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              userCtrl.dispose();
+              passCtrl.dispose();
+              Navigator.pop(dialogCtx);
+            },
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
@@ -94,29 +111,39 @@ class _FloresListScreenState extends State<FloresListScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
-              final res = await http.post(
-                Uri.parse(loginUrl),
-                headers: {'Content-Type': 'application/json'},
-                body: json.encode({
-                  'usuario': userCtrl.text,
-                  'password': passCtrl.text,
-                }),
-              );
+              final user = userCtrl.text.trim();
+              final pass = passCtrl.text.trim();
 
-              if (mounted) {
-                Navigator.pop(context);
-                if (res.statusCode == 200) {
-                  setState(() => isAdmin = true);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Sesión iniciada como Administradora'),
-                    ),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Credenciales incorrectas')),
-                  );
+              if (user.isEmpty || pass.isEmpty) {
+                _showSnackBar('Complete todos los campos');
+                return;
+              }
+
+              try {
+                final res = await http.post(
+                  Uri.parse(loginUrl),
+                  headers: {'Content-Type': 'application/json'},
+                  body: json.encode({'email': user, 'password': pass}),
+                );
+
+                if (mounted) {
+                  Navigator.pop(dialogCtx);
+                  userCtrl.dispose();
+                  passCtrl.dispose();
+
+                  if (res.statusCode == 200 || res.statusCode == 201) {
+                    final data = json.decode(res.body);
+                    setState(() {
+                      isAdmin = true;
+                      authToken = data['access_token'];
+                    });
+                    _showSnackBar('Sesión iniciada como Administrador');
+                  } else {
+                    _showSnackBar('Credenciales incorrectas');
+                  }
                 }
+              } catch (e) {
+                _showSnackBar('Error al conectar con la API');
               }
             },
             child: const Text('Ingresar'),
@@ -127,12 +154,12 @@ class _FloresListScreenState extends State<FloresListScreen> {
   }
 
   void _hacerPedido(dynamic flor) {
-    TextEditingController clienteCtrl = TextEditingController();
-    TextEditingController cantidadCtrl = TextEditingController(text: "1");
+    final clienteCtrl = TextEditingController();
+    final cantidadCtrl = TextEditingController(text: "1");
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         title: Text('Pedido: ${flor['nombre']}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -152,7 +179,11 @@ class _FloresListScreenState extends State<FloresListScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              clienteCtrl.dispose();
+              cantidadCtrl.dispose();
+              Navigator.pop(dialogCtx);
+            },
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
@@ -161,28 +192,41 @@ class _FloresListScreenState extends State<FloresListScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
-              if (clienteCtrl.text.isEmpty) return;
-              final res = await http.post(
-                Uri.parse(pedidosUrl),
-                headers: {'Content-Type': 'application/json'},
-                body: json.encode({
-                  'florId': flor['id'],
-                  'cliente': clienteCtrl.text,
-                  'cantidad': int.parse(cantidadCtrl.text),
-                }),
-              );
+              final cliente = clienteCtrl.text.trim();
+              final cantidad = int.tryParse(cantidadCtrl.text);
 
-              if (mounted) {
-                Navigator.pop(context);
-                if (res.statusCode == 201) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        '¡Pedido realizado! Estado actual: Pendiente',
-                      ),
-                    ),
-                  );
+              if (cliente.isEmpty || cantidad == null || cantidad <= 0) {
+                _showSnackBar('Ingrese datos válidos');
+                return;
+              }
+
+              try {
+                final res = await http.post(
+                  Uri.parse(pedidosUrl),
+                  headers: {'Content-Type': 'application/json'},
+                  body: json.encode({
+                    'florId': flor['id'],
+                    'cliente': cliente,
+                    'cantidad': cantidad,
+                  }),
+                );
+
+                if (mounted) {
+                  Navigator.pop(dialogCtx);
+                  clienteCtrl.dispose();
+                  cantidadCtrl.dispose();
+
+                  if (res.statusCode == 201 || res.statusCode == 200) {
+                    _showSnackBar('¡Pedido registrado exitosamente!');
+                    fetchFlores(); // Actualiza el stock en la vista
+                  } else {
+                    _showSnackBar(
+                      'No se pudo procesar el pedido (Stock insuficiente u otro error)',
+                    );
+                  }
                 }
+              } catch (e) {
+                _showSnackBar('Error al enviar el pedido');
               }
             },
             child: const Text('Confirmar Compra'),
@@ -196,8 +240,11 @@ class _FloresListScreenState extends State<FloresListScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) =>
-            PedidosScreen(pedidosUrl: pedidosUrl, isAdmin: isAdmin),
+        builder: (context) => PedidosScreen(
+          pedidosUrl: pedidosUrl,
+          isAdmin: isAdmin,
+          token: authToken,
+        ),
       ),
     );
   }
@@ -212,19 +259,18 @@ class _FloresListScreenState extends State<FloresListScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.receipt_long),
-            tooltip: 'Ver Mis Pedidos',
+            tooltip: 'Ver Pedidos',
             onPressed: _verPedidos,
           ),
           IconButton(
             icon: Icon(isAdmin ? Icons.logout : Icons.admin_panel_settings),
             onPressed: () {
               if (isAdmin) {
-                setState(() => isAdmin = false);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Sesión de administración cerrada'),
-                  ),
-                );
+                setState(() {
+                  isAdmin = false;
+                  authToken = null;
+                });
+                _showSnackBar('Sesión cerrada');
               } else {
                 _loginDialog();
               }
@@ -232,78 +278,100 @@ class _FloresListScreenState extends State<FloresListScreen> {
           ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              itemCount: flores.length,
-              itemBuilder: (context, index) {
-                final flor = flores[index];
-                final imagenUrl =
-                    flor['imagenUrl'] ?? 'https://via.placeholder.com/150';
+      body: RefreshIndicator(
+        onRefresh: fetchFlores,
+        child: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : flores.isEmpty
+            ? const Center(child: Text('No hay productos disponibles.'))
+            : ListView.builder(
+                itemCount: flores.length,
+                itemBuilder: (context, index) {
+                  final flor = flores[index];
+                  final imagenUrl = flor['imagenUrl'] ?? '';
 
-                return Card(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            imagenUrl,
-                            width: 80,
-                            height: 80,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) =>
-                                const Icon(
-                                  Icons.local_florist,
-                                  size: 50,
-                                  color: Colors.pink,
-                                ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                flor['nombre'] ?? '',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              Text(
-                                flor['descripcion'] ?? '',
-                                style: const TextStyle(color: Colors.grey),
-                              ),
-                              Text(
-                                '\$${flor['precio']}',
-                                style: const TextStyle(
-                                  color: Colors.pink,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.add_shopping_cart,
-                            color: Colors.pinkAccent,
-                          ),
-                          onPressed: () => _hacerPedido(flor),
-                        ),
-                      ],
+                  return Card(
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
                     ),
-                  ),
-                );
-              },
-            ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: imagenUrl.isNotEmpty
+                                ? Image.network(
+                                    imagenUrl,
+                                    width: 80,
+                                    height: 80,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (ctx, err, stack) =>
+                                        const Icon(
+                                          Icons.local_florist,
+                                          size: 50,
+                                          color: Colors.pink,
+                                        ),
+                                  )
+                                : const Icon(
+                                    Icons.local_florist,
+                                    size: 50,
+                                    color: Colors.pink,
+                                  ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  flor['nombre'] ?? 'Sin Nombre',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                Text(
+                                  flor['descripcion'] ?? '',
+                                  style: const TextStyle(color: Colors.grey),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '\$${flor['precio']}',
+                                  style: const TextStyle(
+                                    color: Colors.pink,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  'Stock: ${flor['stock'] ?? 0}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: (flor['stock'] ?? 0) > 0
+                                        ? Colors.green[700]
+                                        : Colors.red,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.add_shopping_cart,
+                              color: Colors.pinkAccent,
+                            ),
+                            onPressed: (flor['stock'] ?? 0) > 0
+                                ? () => _hacerPedido(flor)
+                                : null,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+      ),
       floatingActionButton: isAdmin
           ? FloatingActionButton(
               backgroundColor: Colors.pinkAccent,
@@ -313,7 +381,8 @@ class _FloresListScreenState extends State<FloresListScreen> {
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => AddFlorScreen(apiUrl: apiUrl),
+                    builder: (context) =>
+                        AddFlorScreen(apiUrl: apiUrl, token: authToken),
                   ),
                 );
                 if (result == true) fetchFlores();
@@ -327,10 +396,13 @@ class _FloresListScreenState extends State<FloresListScreen> {
 class PedidosScreen extends StatefulWidget {
   final String pedidosUrl;
   final bool isAdmin;
+  final String? token;
+
   const PedidosScreen({
     super.key,
     required this.pedidosUrl,
     required this.isAdmin,
+    this.token,
   });
 
   @override
@@ -350,25 +422,42 @@ class _PedidosScreenState extends State<PedidosScreen> {
   Future<void> fetchPedidos() async {
     setState(() => isLoading = true);
     try {
-      final res = await http.get(Uri.parse(widget.pedidosUrl));
+      final headers = <String, String>{};
+      if (widget.token != null) {
+        headers['Authorization'] = 'Bearer ${widget.token}';
+      }
+
+      final res = await http.get(
+        Uri.parse(widget.pedidosUrl),
+        headers: headers,
+      );
+
       if (res.statusCode == 200) {
-        setState(() {
-          pedidos = json.decode(res.body);
-          isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            pedidos = json.decode(res.body);
+            isLoading = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() => isLoading = false);
       }
     } catch (e) {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
-  Color _getEstadoColor(String estado) {
+  Color _getEstadoColor(String? estado) {
     switch (estado) {
+      case 'Pendiente':
+        return Colors.orange;
       case 'Recibido':
+      case 'Aprobado':
         return Colors.blue;
       case 'Enviado':
-        return Colors.orange;
+        return Colors.purple;
       case 'Retirado':
+      case 'Entregado':
         return Colors.green;
       default:
         return Colors.grey;
@@ -385,33 +474,38 @@ class _PedidosScreenState extends State<PedidosScreen> {
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
+          : pedidos.isEmpty
+          ? const Center(child: Text('No hay pedidos registrados.'))
           : ListView.builder(
               itemCount: pedidos.length,
               itemBuilder: (context, index) {
                 final p = pedidos[index];
+                final florNombre = p['flor'] != null
+                    ? p['flor']['nombre']
+                    : 'Producto';
+                final estado = p['estado'] ?? 'Pendiente';
+
                 return Card(
                   margin: const EdgeInsets.symmetric(
                     horizontal: 16,
                     vertical: 8,
                   ),
                   child: ListTile(
-                    title: Text(
-                      'Cliente: ${p['cliente']} - Flor: ${p['flor']['nombre']}',
-                    ),
+                    title: Text('Cliente: ${p['cliente']}'),
                     subtitle: Text(
-                      'Cantidad: ${p['cantidad']} | Estado: ${p['estado']}',
+                      'Producto: $florNombre\nCantidad: ${p['cantidad']}',
                     ),
                     trailing: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
+                        horizontal: 10,
+                        vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: _getEstadoColor(p['estado']),
+                        color: _getEstadoColor(estado),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        p['estado'],
+                        estado,
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -428,7 +522,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
 class AddFlorScreen extends StatefulWidget {
   final String apiUrl;
-  const AddFlorScreen({super.key, required this.apiUrl});
+  final String? token;
+
+  const AddFlorScreen({super.key, required this.apiUrl, this.token});
 
   @override
   State<AddFlorScreen> createState() => _AddFlorScreenState();
@@ -443,21 +539,37 @@ class _AddFlorScreenState extends State<AddFlorScreen> {
   final _imagenUrlController = TextEditingController();
   bool isSubmitting = false;
 
+  @override
+  void dispose() {
+    _nombreController.dispose();
+    _descripcionController.dispose();
+    _precioController.dispose();
+    _stockController.dispose();
+    _imagenUrlController.dispose();
+    super.dispose();
+  }
+
   Future<void> _guardarFlor() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => isSubmitting = true);
 
     try {
+      final headers = <String, String>{'Content-Type': 'application/json'};
+
+      if (widget.token != null) {
+        headers['Authorization'] = 'Bearer ${widget.token}';
+      }
+
       final response = await http.post(
         Uri.parse(widget.apiUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: json.encode({
-          'nombre': _nombreController.text,
-          'descripcion': _descripcionController.text,
-          'precio': double.parse(_precioController.text),
-          'stock': int.parse(_stockController.text),
-          'imagenUrl': _imagenUrlController.text.isNotEmpty
-              ? _imagenUrlController.text
+          'nombre': _nombreController.text.trim(),
+          'descripcion': _descripcionController.text.trim(),
+          'precio': double.parse(_precioController.text.trim()),
+          'stock': int.parse(_stockController.text.trim()),
+          'imagenUrl': _imagenUrlController.text.trim().isNotEmpty
+              ? _imagenUrlController.text.trim()
               : null,
         }),
       );
@@ -468,6 +580,14 @@ class _AddFlorScreenState extends State<AddFlorScreen> {
             const SnackBar(content: Text('¡Producto registrado con éxito!')),
           );
           Navigator.pop(context, true);
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error al guardar (${response.statusCode})'),
+            ),
+          );
         }
       }
     } catch (e) {
@@ -499,32 +619,45 @@ class _AddFlorScreenState extends State<AddFlorScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Nombre de la Flor',
                 ),
-                validator: (val) =>
-                    val == null || val.isEmpty ? 'Ingrese un nombre' : null,
+                validator: (val) => val == null || val.trim().isEmpty
+                    ? 'Ingrese un nombre'
+                    : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _descripcionController,
                 decoration: const InputDecoration(labelText: 'Descripción'),
-                validator: (val) => val == null || val.isEmpty
+                validator: (val) => val == null || val.trim().isEmpty
                     ? 'Ingrese una descripción'
                     : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _precioController,
-                keyboardType: TextInputType.number,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 decoration: const InputDecoration(labelText: 'Precio (\$)'),
-                validator: (val) =>
-                    val == null || val.isEmpty ? 'Ingrese el precio' : null,
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty)
+                    return 'Ingrese el precio';
+                  if (double.tryParse(val.trim()) == null)
+                    return 'Ingrese un número válido';
+                  return null;
+                },
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _stockController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: 'Stock'),
-                validator: (val) =>
-                    val == null || val.isEmpty ? 'Ingrese el stock' : null,
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty)
+                    return 'Ingrese el stock';
+                  if (int.tryParse(val.trim()) == null)
+                    return 'Ingrese un entero válido';
+                  return null;
+                },
               ),
               const SizedBox(height: 12),
               TextFormField(
