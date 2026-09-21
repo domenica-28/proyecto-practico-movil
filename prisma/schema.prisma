@@ -45,7 +45,7 @@ model User {
   email        String   @unique @db.VarChar(180)
   username     String?  @unique @db.VarChar(100)
   passwordHash String?  @map("password_hash") @db.Text
-  status       String   @db.VarChar(30)
+  status       String   @default("ACTIVO") @db.VarChar(30)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -53,6 +53,7 @@ model User {
   authAccounts AuthAccount[]
   sessions     UserSession[]
   userRoles    UserRole[]
+  pedidos      Pedido[]      // <--- Relación agregada: Un cliente tiene sus pedidos
 
   @@map("users")
 }
@@ -62,6 +63,7 @@ model UserProfile {
   firstName      String   @map("first_name") @db.VarChar(100)
   lastName       String   @map("last_name") @db.VarChar(100)
   identification String?  @db.VarChar(30)
+  telefono       String?  @db.VarChar(20)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -96,11 +98,11 @@ model UserSession {
 
 // --- CONTROL DE ACCESO RBAC ---
 model Role {
-  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String? @map("organization_id") @db.Uuid
-  code           String  @db.VarChar(100)
-  name           String  @db.VarChar(150)
-  isSystem       Boolean @default(false) @map("is_system")
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(100) // ej: "CLIENTE", "ADMIN_FLORERIA", "REPARTIDOR"
+  name           String   @db.VarChar(150)
+  isSystem       Boolean  @default(false) @map("is_system")
 
   organization Organization?    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   permissions  RolePermission[]
@@ -177,42 +179,51 @@ model MenuPermission {
   @@map("menu_permissions")
 }
 
-// --- MÓDULO DE CATÁLOGO / FLORISTERÍA ---
-model Flor {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  nombre      String   @db.VarChar(150)
-  descripcion String?  @db.Text
-  precio      Float
-  stock       Int      @default(0)
-  estado      String   @default("ACTIVO") @db.VarChar(30)
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@map("flor_uuid")
-}
-
+// --- MÓDULO DE CATÁLOGO Y PEDIDOS ---
 model Flores {
   id          Int      @id @default(autoincrement())
-  nombre      String
-  descripcion String
+  nombre      String   @db.VarChar(150)
+  descripcion String   @db.Text
   precio      Float
-  stock       Int
+  stock       Int      @default(0)
   estado      Boolean  @default(true)
-  imagenUrl   String?
+  imagenUrl   String?  @map("imagen_url")
+
   pedidos     Pedido[]
 
   @@map("flores")
 }
 
 model Pedido {
-  id       Int      @id @default(autoincrement())
-  florId   Int
-  flor     Flores   @relation(fields: [florId], references: [id])
-  cliente  String
-  cantidad Int
-  visto    Boolean  @default(false)
-  estado   String   @default("Pendiente")
-  fecha    DateTime @default(now())
+  id                 Int      @id @default(autoincrement())
+  
+  // Relación con el producto (Flor)
+  florId             Int      @map("flor_id")
+  flor               Flores   @relation(fields: [florId], references: [id])
 
+  // Relación con el Cliente que hace la compra
+  userId             String   @map("user_id") @db.Uuid
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  cantidad           Int
+  precioTotal        Float    @map("precio_total")
+  
+  // --- NATIVOS SEMANA 14 (GPS Y CÁMARA / COMPROBANTE) ---
+  tipoEntrega        String   @default("DOMICILIO") @db.VarChar(30) // "DOMICILIO" o "RETIRO_LOCAL"
+  direccion          String?  @db.Text
+  latitud            Float?   // Capturado con GPS para entregas a domicilio
+  longitud           Float?   // Capturado con GPS para entregas a domicilio
+  
+  metodoPago         String   @default("TRANSFERENCIA") @db.VarChar(50) // "TRANSFERENCIA", "EFECTIVO", "TARJETA"
+  comprobantePagoUrl String?  @map("comprobante_pago_url") @db.Text // <--- CÁMARA/GALERÍA: Foto del comprobante subida por el cliente
+
+  // ESTADO DEL PEDIDO (Visibilidad para el cliente)
+  // Opciones recomendadas: "Pendiente Pago", "Pago Verificado", "En Preparación", "Listo en Local", "En Camino", "Entregado"
+  estado             String   @default("Pendiente Pago") @db.VarChar(50)
+  visto              Boolean  @default(false)
+  fecha              DateTime @default(now()) @db.Timestamptz
+
+  @@index([userId])
+  @@index([florId])
   @@map("pedidos")
 }
