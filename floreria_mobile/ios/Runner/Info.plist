@@ -2,6 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- CADENAS DE PROPÓSITO - SEMANA 14 -->
+	<key>NSCameraUsageDescription</key>
+	<string>Necesitamos acceso a la cámara para tomar fotos de las flores y adjuntarlas a sus pedidos o al catálogo.</string>
+	
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Requerimos su ubicación para confirmar la dirección de entrega del pedido de flores y calcular la cobertura del envío.</string>
+
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
