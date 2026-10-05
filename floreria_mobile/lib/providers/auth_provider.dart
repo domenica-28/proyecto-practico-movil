@@ -4,27 +4,55 @@ import '../models/usuario_model.dart';
 import '../services/auth_service.dart';
 
 class AuthProvider extends ChangeNotifier {
-  Usuario? _usuario;
   final AuthService _authService = AuthService();
 
-  Usuario? get usuario => _usuario;
-  bool get isAuthenticated => _usuario != null;
-  bool get isAdmin => _usuario?.rol == 'ADMIN';
+  UsuarioModel? _usuario;
+  bool _isLoading = false;
 
-  Future<String?> login(String email, String password) async {
-    final result = await _authService.login(email, password);
-    if (result['success']) {
-      final data = result['data'];
-      _usuario = Usuario.fromJson(data['usuario'], data['accessToken']);
-      notifyListeners(); // Notifica a toda la app que la sesión cambió
-      return null; // Sin errores
+  UsuarioModel? get usuario => _usuario;
+  bool get isLoading => _isLoading;
+  bool get isAuthenticated => _usuario != null && _usuario!.token != null;
+
+  // Método para Iniciar Sesión
+  Future<bool> login(String email, String password) async {
+    _isLoading = true;
+    notifyListeners();
+
+    final user = await _authService.login(email, password);
+
+    _isLoading = false;
+    if (user != null) {
+      _usuario = user;
+      notifyListeners();
+      return true;
     } else {
-      return result['message'];
+      notifyListeners();
+      return false;
     }
   }
 
+  // Nuevo método para Registrar Cuenta con Nombre y Apellido
+  Future<bool> register(
+      String nombre, String apellido, String email, String password) async {
+    _isLoading = true;
+    notifyListeners();
+
+    final user = await _authService.register(nombre, apellido, email, password);
+
+    _isLoading = false;
+    if (user != null) {
+      _usuario = user;
+      notifyListeners();
+      return true;
+    } else {
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Método para Cerrar Sesión
   void logout() {
     _usuario = null;
-    notifyListeners(); // Limpia la sesión en toda la app
+    notifyListeners();
   }
 }
